@@ -226,6 +226,9 @@ namespace swss {
 #define CFG_NAT_BINDINGS_TABLE_NAME                 "NAT_BINDINGS"
 #define CFG_NAT_GLOBAL_TABLE_NAME                   "NAT_GLOBAL"
 
+/* Configuration for Tx Error Monitor on a Port */
+#define CFG_PORT_TX_ERR_TABLE_NAME                  "TX_ERR_CFG"
+
 /***** STATE DATABASE *****/
 
 #define STATE_SWITCH_CAPABILITY_TABLE_NAME          "SWITCH_CAPABILITY_TABLE"
@@ -246,6 +249,9 @@ namespace swss {
 #define STATE_BGP_TABLE_NAME                        "BGP_STATE_TABLE"
 #define STATE_DEBUG_COUNTER_CAPABILITIES_NAME       "DEBUG_COUNTER_CAPABILITIES"
 #define STATE_NAT_RESTORE_TABLE_NAME                "NAT_RESTORE_TABLE"
+
+/* Port State based on Tx Error Monitoring on a port */
+#define STATE_TX_ERR_TABLE_NAME                     "TX_ERR_STATE"
 
 /***** MISC *****/
 
