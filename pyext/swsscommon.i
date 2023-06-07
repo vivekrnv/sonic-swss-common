@@ -48,6 +48,7 @@
 #include "zmqclient.h"
 #include "zmqconsumerstatetable.h"
 #include "zmqproducerstatetable.h"
+#include "keyspacesubscriber.h"
 %}
 
 %include <std_string.i>
@@ -224,6 +225,7 @@ T castSelectableObj(swss::Selectable *temp)
 %include "consumertable.h"
 %include "consumerstatetable.h"
 %include "subscriberstatetable.h"
+%include "keyspacesubscriber.h"
 %include "decoratorsubscriberstatetable.h"
 
 %apply std::string& OUTPUT {std::string &op};

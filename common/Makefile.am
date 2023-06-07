@@ -67,6 +67,7 @@ common_libswsscommon_la_SOURCES = \
     common/countertable.cpp          \
     common/redisutility.cpp          \
     common/restart_waiter.cpp        \
+    common/keyspacesubscriber.cpp        \
     common/profileprovider.cpp       \
     common/zmqclient.cpp             \
     common/zmqserver.cpp             \
