@@ -1,45 +1,44 @@
-from swsscommon.swsscommon import KeySpaceSubscriber, Select
+from swsscommon.swsscommon import KeySpaceSubscriber, Select, SonicDBConfig
 import syslog
 import signal
-import sys
+import sys, time
 
 class MockHostConfigDaemon:
     def __init__(self):
-        self.key_space = KeySpaceSubscriber("CONFIG_DB")
+        pass
 
-    def subscribe(self, table):
-        m_keyspace = f"__keyspace@4__:{table}|*"
-        print(f"Subscribed to {m_keyspace}")
-        self.key_space.psubscribe(m_keyspace)
+    def format(self, table):
+        m_notif = f"__keyspace@4__:{table}|*"
+        print(f"Subscribing to {m_notif}")
+        return f"__keyspace@4__:{table}|*"
 
-    def subscribe_tables(self):
-        self.subscribe('KDUMP')
+    def subscribe_tables(self, key_space):
+        key_space.psubscribe(self.format('KDUMP'))
         # Handle FEATURE updates before other tables
-        self.subscribe('FEATURE')
+        key_space.psubscribe(self.format('FEATURE'))
         # Handle AAA and TACACS related tables
-        self.subscribe('AAA')
-        self.subscribe('TACPLUS_SERVER')
-        self.subscribe('TACPLUS')
-        self.subscribe('LOOPBACK_INTERFACE') 
+        key_space.psubscribe(self.format('AAA'))
+        key_space.psubscribe(self.format('TACPLUS_SERVER'))
+        key_space.psubscribe(self.format('TACPLUS'))
+        key_space.psubscribe(self.format('LOOPBACK_INTERFACE'))
         # Handle NTP & NTP_SERVER updates
-        self.subscribe('NTP_SERVER')
-        self.subscribe('NTP')
-        self.subscribe('AUTO_TECHSUPPORT')
-        self.subscribe('PORT')
+        key_space.psubscribe(self.format('NTP_SERVER'))
+        key_space.psubscribe(self.format('NTP'))
+        key_space.psubscribe(self.format('AUTO_TECHSUPPORT'))
+        key_space.psubscribe(self.format('PORT'))
 
     def start(self):
-        self.selector = Select()
-        self.selector.addSelectable(self.key_space)
+        # self.selector = Select()
+        key_space = KeySpaceSubscriber("CONFIG_DB")
+        self.subscribe_tables(key_space)
+        # self.selector.addSelectable(key_space)
         while True:
-            state, selectable_ = self.selector.select(2000)
-            if state == self.selector.TIMEOUT:
-                print("error returned by timeout")
-                continue
-            elif state == self.selector.ERROR:
-                print("error returned by select")
-                continue
-            print(self.key_space.pops())
-            print("Select Returned by selev")
+            time.sleep(1)
+            print("Data Read")
+            ret = key_space.readData()
+            print(f"Data Read: {ret}")
+            print("Event")
+            print(key_space.pops())
 
 def signal_handler(sig, frame):
     if sig == signal.SIGHUP:
@@ -55,7 +54,6 @@ def signal_handler(sig, frame):
 
 def main():
     daemon = MockHostConfigDaemon()
-    daemon.subscribe_tables()
     daemon.start()
 
 if __name__ == "__main__":

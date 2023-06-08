@@ -9,7 +9,7 @@ namespace swss {
 
 KeySpaceSubscriber::KeySpaceSubscriber(const std::string &dbName, int pri) : RedisSelect(pri)
 {
-    m_subscribe = std::make_unique<DBConnector>(dbName, SUBSCRIBE_TIMEOUT);
+    m_subscribe = std::make_unique<DBConnector>(dbName, 1000);
     m_subscribe->setClientName("KeySpaceSubscriber");
 }
 
