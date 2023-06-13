@@ -1,8 +1,8 @@
 #include "common/selectable.h"
 #include "common/logger.h"
 #include "common/select.h"
-#include <algorithm>
 #include <stdio.h>
+#include <iostream>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/epoll.h>
@@ -17,6 +17,7 @@ namespace swss {
 Select::Select()
 {
     m_epoll_fd = ::epoll_create1(0);
+    sz_selectables = 0;
     if (m_epoll_fd == -1)
     {
         std::string error = std::string("Select::constructor:epoll_create1: error=("
@@ -34,14 +35,15 @@ Select::~Select()
 void Select::addSelectable(Selectable *selectable)
 {
     const int fd = selectable->getFd();
-
     if(m_objects.find(fd) != m_objects.end())
     {
         SWSS_LOG_WARN("Selectable is already added to the list, ignoring.");
         return;
     }
 
-    m_objects[fd] = selectable;
+    m_objects.emplace(std::piecewise_construct, 
+                      std::forward_as_tuple(fd),
+                      std::forward_as_tuple(selectable, selectable->getMaxEvents()));
 
     if (selectable->initializedWithData())
     {
@@ -61,14 +63,23 @@ void Select::addSelectable(Selectable *selectable)
                           + strerror(errno));
         throw std::runtime_error(error);
     }
+
+    sz_selectables += selectable->getMaxEvents();
 }
 
 void Select::removeSelectable(Selectable *selectable)
 {
     const int fd = selectable->getFd();
+    if (m_objects.find(fd) == m_objects.end())
+    {   
+        SWSS_LOG_ERROR("Selectable is not added to the list, ignoring..");
+        return ;
+    }
 
+    auto events_sel = m_objects[fd].maxevents;    
     m_objects.erase(fd);
     m_ready.erase(selectable);
+    sz_selectables = sz_selectables - events_sel ? events_sel <= sz_selectables : recompute_maxevents();
 
     int res = ::epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
     if (res == -1)
@@ -90,13 +101,12 @@ void Select::addSelectables(vector<Selectable *> selectables)
 
 int Select::poll_descriptors(Selectable **c, unsigned int timeout, bool interrupt_on_signal = false)
 {
-    int sz_selectables = static_cast<int>(m_objects.size());
     std::vector<struct epoll_event> events(sz_selectables);
     int ret;
 
     while(true)
     {
-        ret = ::epoll_wait(m_epoll_fd, events.data(), sz_selectables, timeout);
+        ret = ::epoll_wait(m_epoll_fd, events.data(), static_cast<int>(sz_selectables), timeout);
         // on signal interrupt check if we need to return
         if (ret == -1 && errno == EINTR)
         {
@@ -114,13 +124,14 @@ int Select::poll_descriptors(Selectable **c, unsigned int timeout, bool interrup
 
     if (ret < 0)
     {
+        SWSS_LOG_WARN("epoll_wait returned %d, with error %s", ret, strerror(errno));
         return Select::ERROR;
     }
 
     for (int i = 0; i < ret; ++i)
     {
         int fd = events[i].data.fd;
-        Selectable* sel = m_objects[fd];
+        Selectable* sel = m_objects[fd].sel;
         try
         {
             sel->readData();

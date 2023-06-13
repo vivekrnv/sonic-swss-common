@@ -8,6 +8,8 @@
 
 namespace swss {
 
+constexpr unsigned int RedisSelect::SUBSCRIBE_TIMEOUT;
+
 RedisSelect::RedisSelect(int pri) : Selectable(pri), m_queueLength(-1)
 {
 }

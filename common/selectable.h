@@ -58,6 +58,18 @@ public:
         return m_priority;
     }
 
+    /* 
+       Number of events to be used in epoll_wait for this fd
+       New Redis Selectables can subscribe to mutiple channels with a single fd.
+       This would increase the throughput of events coming in.
+       Setting this to num of channels the selectable uses, 
+       would lead to 1 syscall per selectable during workloads of max throughput 
+    */
+    virtual uint64_t getMaxEvents()
+    {
+        return 1;
+    }
+
 private:
 
     friend class Select;

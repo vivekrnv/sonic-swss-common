@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <queue>
+#include <algorithm>
 #include <unordered_map>
 #include <set>
 #include <hiredis/hiredis.h>
@@ -69,8 +70,27 @@ private:
     int poll_descriptors(Selectable **c, unsigned int timeout, bool interrupt_on_signal);
 
     int m_epoll_fd;
-    std::unordered_map<int, Selectable *> m_objects;
+    /* maximum number of events to poll during a single syscall of epoll_wait */
+    uint64_t sz_selectables;
+
+    struct SelData
+    {
+        Selectable* sel;
+        uint64_t maxevents;
+        SelData() : sel(nullptr), maxevents(0) {}
+        SelData(Selectable* s, uint64_t m) : sel(s), maxevents(m) {}
+    };
+
+    std::unordered_map<int, SelData> m_objects;
     std::set<Selectable *, Select::cmp> m_ready;
+
+    uint64_t inline recompute_maxevents()
+    {
+        uint64_t num_ev = 0;
+        std::for_each(m_objects.begin(), m_objects.end(), [&](const std::pair<int, SelData>& obj) {num_ev += obj.second.maxevents;});
+        return num_ev;
+    }
+    
 };
 
 }

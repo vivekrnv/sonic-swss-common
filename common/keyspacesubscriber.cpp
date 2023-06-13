@@ -1,5 +1,6 @@
 #include <string>
 #include <memory>
+#include <iostream>
 #include <hiredis/hiredis.h>
 #include "logger.h"
 #include "dbconnector.h"
@@ -7,29 +8,38 @@
 
 namespace swss {
 
-KeySpaceSubscriber::KeySpaceSubscriber(const std::string &dbName, int pri) : RedisSelect(pri)
+KeySpaceSubscriber::KeySpaceSubscriber(const std::string &dbName, int pri, const std::string& clientName) : RedisSelect(pri)
 {
-    m_subscribe = std::make_unique<DBConnector>(dbName, 1000);
-    m_subscribe->setClientName("KeySpaceSubscriber");
+    m_subscribe = std::make_unique<DBConnector>(dbName, RedisSelect::SUBSCRIBE_TIMEOUT);
+    setClientName(clientName);
+}
+
+KeySpaceSubscriber::KeySpaceSubscriber(DBConnector *db, int pri, const std::string& clientName) : RedisSelect(pri)
+{
+    m_subscribe.reset(db->newConnector(RedisSelect::SUBSCRIBE_TIMEOUT));
+    setClientName(clientName);
 }
 
 void KeySpaceSubscriber::subscribe(const std::string &pattern)
 {
     m_subscribe->subscribe(pattern);
+    m_patterns.insert(pattern);
 }
 
 void KeySpaceSubscriber::psubscribe(const std::string &pattern)
 {
     m_subscribe->psubscribe(pattern);
+    m_patterns.insert(pattern);
 }
 
 void KeySpaceSubscriber::punsubscribe(const std::string &pattern)
 {
     m_subscribe->punsubscribe(pattern);
+    m_patterns.erase(pattern);
 }
 
 uint64_t KeySpaceSubscriber::readData()
-{
+{   
     redisReply *reply = nullptr;
 
     /* Read data from redis. This call is non blocking. This method
@@ -41,7 +51,9 @@ uint64_t KeySpaceSubscriber::readData()
         throw std::runtime_error("Unable to read redis reply");
     }
 
-    m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
+    auto temp = std::make_shared<RedisReply>(reply);
+    std::cout << temp->to_string() << std::endl;
+    m_keyspace_event_buffer.emplace_back(temp);
 
     /* Try to read data from redis cacher.
      * If data exists put it to event buffer.
@@ -56,7 +68,9 @@ uint64_t KeySpaceSubscriber::readData()
         status = redisGetReplyFromReader(m_subscribe->getContext(), reinterpret_cast<void**>(&reply));
         if(reply != nullptr && status == REDIS_OK)
         {
-            m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
+            temp = std::make_shared<RedisReply>(reply);
+            std::cout << temp->to_string() << std::endl;
+            m_keyspace_event_buffer.emplace_back(temp);
         }
     }
     while(reply != nullptr && status == REDIS_OK);
@@ -79,6 +93,11 @@ std::shared_ptr<RedisReply> KeySpaceSubscriber::popEventBuffer()
     m_keyspace_event_buffer.pop_front();
 
     return reply;
+}
+
+bool KeySpaceSubscriber::hasData()
+{
+    return m_keyspace_event_buffer.size() > 0;
 }
 
 std::deque<std::string> KeySpaceSubscriber::pops()
