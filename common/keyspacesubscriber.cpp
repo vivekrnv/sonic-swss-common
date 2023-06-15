@@ -1,6 +1,6 @@
 #include <string>
 #include <memory>
-#include <iostream>
+#include <algorithm>
 #include <hiredis/hiredis.h>
 #include "logger.h"
 #include "dbconnector.h"
@@ -8,16 +8,17 @@
 
 namespace swss {
 
-KeySpaceSubscriber::KeySpaceSubscriber(const std::string &dbName, int pri, const std::string& clientName) : RedisSelect(pri)
+KeySpaceSubscriber::KeySpaceSubscriber(DBConnector *parentConn, int pri) : RedisSelect(pri)
 {
-    m_subscribe = std::make_unique<DBConnector>(dbName, RedisSelect::SUBSCRIBE_TIMEOUT);
-    setClientName(clientName);
+    m_subscribe.reset(parentConn->newConnector(RedisSelect::SUBSCRIBE_TIMEOUT));
 }
 
-KeySpaceSubscriber::KeySpaceSubscriber(DBConnector *db, int pri, const std::string& clientName) : RedisSelect(pri)
+void KeySpaceSubscriber::setClientName(const std::string& name)
 {
-    m_subscribe.reset(db->newConnector(RedisSelect::SUBSCRIBE_TIMEOUT));
-    setClientName(clientName);
+    if (m_subscribe && !name.empty())
+    {
+        m_subscribe->setClientName(name);
+    }
 }
 
 void KeySpaceSubscriber::subscribe(const std::string &pattern)
@@ -38,6 +39,44 @@ void KeySpaceSubscriber::punsubscribe(const std::string &pattern)
     m_patterns.erase(pattern);
 }
 
+void KeySpaceSubscriber::subscribe(const std::vector<std::string>& patterns)
+{
+    m_subscribe->subscribe(processBulk(patterns, true));
+}
+
+void KeySpaceSubscriber::psubscribe(const std::vector<std::string>& patterns)
+{
+    m_subscribe->psubscribe(processBulk(patterns, true));
+}
+
+void KeySpaceSubscriber::punsubscribe(const std::vector<std::string>& patterns)
+{
+    m_subscribe->punsubscribe(processBulk(patterns, false));
+}
+
+std::string KeySpaceSubscriber::processBulk(const std::vector<std::string> &patterns, bool add)
+{
+    std::string pattern = "";
+    int num_patterns = (int)patterns.size();
+    for (auto i = 0; i < num_patterns; i++)
+    {
+        pattern += patterns[i];
+        if (i != num_patterns-1)
+        {
+            pattern += " ";
+        }
+        if (add)
+        {
+            m_patterns.insert(patterns[i]);
+        }
+        else
+        {
+            m_patterns.erase(patterns[i]);
+        }
+    }
+    return pattern;
+}
+
 uint64_t KeySpaceSubscriber::readData()
 {   
     redisReply *reply = nullptr;
@@ -51,9 +90,7 @@ uint64_t KeySpaceSubscriber::readData()
         throw std::runtime_error("Unable to read redis reply");
     }
 
-    auto temp = std::make_shared<RedisReply>(reply);
-    std::cout << temp->to_string() << std::endl;
-    m_keyspace_event_buffer.emplace_back(temp);
+    m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
 
     /* Try to read data from redis cacher.
      * If data exists put it to event buffer.
@@ -68,9 +105,7 @@ uint64_t KeySpaceSubscriber::readData()
         status = redisGetReplyFromReader(m_subscribe->getContext(), reinterpret_cast<void**>(&reply));
         if(reply != nullptr && status == REDIS_OK)
         {
-            temp = std::make_shared<RedisReply>(reply);
-            std::cout << temp->to_string() << std::endl;
-            m_keyspace_event_buffer.emplace_back(temp);
+            m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
         }
     }
     while(reply != nullptr && status == REDIS_OK);
@@ -82,34 +117,42 @@ uint64_t KeySpaceSubscriber::readData()
     return 0;
 }
 
-std::shared_ptr<RedisReply> KeySpaceSubscriber::popEventBuffer()
+bool KeySpaceSubscriber::popEventBuffer(RedisMessage& msg)
 {
     if (m_keyspace_event_buffer.empty())
     {
-        return NULL;
+        return false;
     }
 
     auto reply = m_keyspace_event_buffer.front();
+    msg = reply->getReply<RedisMessage>();
     m_keyspace_event_buffer.pop_front();
-
-    return reply;
-}
-
-bool KeySpaceSubscriber::hasData()
-{
-    return m_keyspace_event_buffer.size() > 0;
-}
-
-std::deque<std::string> KeySpaceSubscriber::pops()
-{
-    std::string reply;
-    std::deque<std::string> vkco;
-    while (auto event = popEventBuffer())
-    {   
-       vkco.push_back(event->to_string());
-       SWSS_LOG_NOTICE("Event: %s", event->to_string().c_str());
+    
+    /* if the Key-space notification is empty, try next one. */
+    if (msg.type.empty())
+    {
+        return false;
     }
-    return vkco;
+
+    if (m_patterns.find(msg.pattern) == m_patterns.end())
+    {
+        SWSS_LOG_ERROR("keyspace notification recieved for unsubscribed pattern %s", msg.pattern.c_str());
+        return false;
+    }
+
+    return true;
+}
+
+void KeySpaceSubscriber::pops(std::deque<RedisMessage> &dQ)
+{   
+    RedisMessage ret;
+    while (hasData())
+    {
+       if (popEventBuffer(ret))
+       {
+           dQ.push_back(ret);
+       }
+    }
 }
 
 }

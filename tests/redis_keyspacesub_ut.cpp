@@ -2,27 +2,23 @@
 #include <memory>
 #include <thread>
 #include <algorithm>
+#include <future>
 #include "gtest/gtest.h"
 #include "common/dbconnector.h"
 #include "common/select.h"
-#include "common/selectableevent.h"
 #include "common/table.h"
-#include "common/keyspacesubscriber.cpp"
+#include "common/keyspacesubscriber.h"
 
 using namespace std;
 using namespace swss;
 
-#define NUMBER_OF_THREADS    (1) // Spawning more than 256 threads causes libc++ to except
-#define NUMBER_OF_OPS     (1000)
-#define MAX_FIELDS_DIV      (30) // Testing up to 30 fields objects
-#define PRINT_SKIP          (10) // Print + for Producer and - for Subscriber for every 100 ops
+static const int NUMBER_OF_OPS     = 40;
+static const int MAX_FIELDS_DIV    = 30; // Testing up to 30 fields objects
 
 static const string testTableName = "UT_REDIS_TABLE";
 static const string testTableName2 = "UT_REDIS_TABLE2";
-
-static bool endSubscription = false; // TODO: use a conditional Variable
-
-static int totalEvents = 0;
+static const string testTableName3 = "UT_REDIS_TABLE3";
+static const string testTableName4 = "UT_REDIS_TABLE4";
 
 static inline int getMaxFields(int i)
 {
@@ -41,50 +37,7 @@ static inline string field(int index, int keyid)
 
 static inline string value(int index, int keyid)
 {
-    if (keyid == 0)
-    {
-        return string(); // empty
-    }
-
     return string("value ") + to_string(index) + ":" + to_string(keyid);
-}
-
-static inline int readNumberAtEOL(const string& str)
-{
-    if (str.empty())
-    {
-        return 0;
-    }
-
-    auto pos = str.find(":");
-    if (pos == str.npos)
-    {
-        return 0;
-    }
-
-    istringstream is(str.substr(pos + 1));
-
-    int ret;
-    is >> ret;
-
-    EXPECT_TRUE((bool)is);
-
-    return ret;
-}
-
-static inline void validateFields(const string& key, const vector<FieldValueTuple>& f)
-{
-    unsigned int maxNumOfFields = getMaxFields(readNumberAtEOL(key));
-    int i = 0;
-
-    EXPECT_EQ(maxNumOfFields, f.size());
-
-    for (auto fv : f)
-    {
-        EXPECT_EQ(i, readNumberAtEOL(fvField(fv)));
-        EXPECT_EQ(i, readNumberAtEOL(fvValue(fv)));
-        i++;
-    }
 }
 
 static inline void clearDB()
@@ -94,108 +47,237 @@ static inline void clearDB()
     r.checkStatusOK();
 }
 
-static void producerWorker(int index, const std::string& table)
+namespace keyspacesubscriber_ut
 {
-    DBConnector db("TEST_DB", 0, true);
-    Table p(&db, table);
+    using namespace swss;
+    using namespace std;
 
-    for (int i = 0; i < NUMBER_OF_OPS; i++)
+    class KeySpaceSubTestFixture : public ::testing::Test
     {
-        vector<FieldValueTuple> fields;
-        int maxNumOfFields = getMaxFields(i);
+    public:
+        vector<shared_ptr<thread>> listenerPool;
+        vector<shared_ptr<thread>> producerPool;
+        vector<int> totalEvents;
+        std::atomic<bool> stopSubscriber;
+        vector<string> testTables;
+        shared_ptr<swss::DBConnector> m_test_db;
 
-        for (int j = 0; j < maxNumOfFields; j++)
+        KeySpaceSubTestFixture()
         {
-            FieldValueTuple t(field(index, j), value(index, j));
-            fields.push_back(t);
+            m_test_db = make_shared<swss::DBConnector>("TEST_DB", 0, true);
         }
 
-        if ((i % 100) == 0)
+        virtual void SetUp() override
         {
-            cout << "+" << flush;
+            totalEvents.clear();
+            stopSubscriber = false;
+            testTables.clear();
         }
 
-        p.set(key(index, i), fields);
-    }
-
-    for (int i = 0; i < NUMBER_OF_OPS; i++)
-    {
-        p.del(key(index, i));
-    }
-}
-
-
-static inline std::string getkeySpace(DBConnector *db, std::string table)
-{
-   return "__keyspace@" + to_string(db->getDbId()) + "__:" + table + ":" + "*";
-}
-
-static void subscriberWorker(vector<string> tables)
-{
-    DBConnector db("TEST_DB", 0, true);
-
-    KeySpaceSubscriber c("TEST_DB");
-    
-    for (auto table : tables)
-    {
-         c.psubscribe(getkeySpace(&db, table)); /* Subscribe to multiple channels */
-    }
-
-    Select cs;
-    cs.addSelectable(&c);
-
-    while(true && !endSubscription)
-    {
-        Selectable *selectcs = nullptr;
-        int ret = cs.select(&selectcs, 1000);
-        
-        if (ret == Select::ERROR)
+        std::string getkeySpace(std::string table)
         {
-            SWSS_LOG_NOTICE("%s select error %s", __PRETTY_FUNCTION__, strerror(errno));
-            continue;
+            return "__keyspace@" + to_string(m_test_db->getDbId()) + "__:" + table + ":" + "*";
         }
 
-        if (ret == Select::TIMEOUT)
+        void subscriberWorker(int index)
         {
-            SWSS_LOG_DEBUG("%s select timeout, ", __PRETTY_FUNCTION__);
-            cout << "Select Timeout " << endl;
-            continue;
-        }        
-        
-        auto Q = c.pops();
-        for (size_t i = 0; i < Q.size(); i++) {
-            std::cout << Q[i] <<  std::endl;
+            KeySpaceSubscriber c(m_test_db.get());
+            std::string clientName = "test_keyspacesubscriber" + to_string(index);
+            c.setClientName(clientName);
+            vector<string> temp;
+            for (auto table : testTables)
+            {
+                temp.push_back(getkeySpace(table)); /* Subscribe to multiple channels */
+            }
+            if (temp.size() > 1) c.psubscribe(temp);
+            else c.psubscribe(getkeySpace(testTables[0]));
+            totalEvents[index] = select_loop(&c);
         }
 
-        totalEvents += (int)Q.size();
+        int select_loop(KeySpaceSubscriber* s)
+        {
+            Select cs;
+            cs.addSelectable(s);
+            int num_events = 0;
+            while(true && !stopSubscriber)
+            {
+                Selectable *selectcs = nullptr;
+                int ret = cs.select(&selectcs, 1000);
+                if (ret == Select::ERROR)
+                {
+                    SWSS_LOG_NOTICE("%s select error %s", __PRETTY_FUNCTION__, strerror(errno));
+                    continue;
+                }
+
+                if (ret == Select::TIMEOUT)
+                {
+                    SWSS_LOG_DEBUG("%s select timeout, ", __PRETTY_FUNCTION__);
+                    cout << "Select Timeout " << endl;
+                    continue;
+                }
+
+                if (ret == Select::OBJECT)
+                {
+                    std::deque<RedisMessage> Q;
+                    s->pops(Q);
+                    while(!Q.empty()) {
+                        auto msg = Q.front();
+                        Q.pop_front();
+                        num_events++;
+                    }
+                }
+                else
+                {
+                    SWSS_LOG_ERROR(" Error Type Recieved %d", ret);
+                }
+            }
+            cs.removeSelectable(s);
+            return num_events;
+        }
+
+        void producerWorker(int index, const std::string& table)
+        {
+            Table p(m_test_db.get(), table);
+
+            for (int i = 0; i < NUMBER_OF_OPS; i++)
+            {
+                vector<FieldValueTuple> fields;
+                int maxNumOfFields = getMaxFields(i);
+
+                for (int j = 0; j < maxNumOfFields; j++)
+                {
+                    FieldValueTuple t(field(index, j), value(index, j));
+                    fields.push_back(t);
+                }
+
+                if ((i % 100) == 0)
+                {
+                    cout << "+" << flush;
+                }
+
+                p.set(key(index, i), fields);
+            }
+
+            for (int i = 0; i < NUMBER_OF_OPS; i++)
+            {
+                p.del(key(index, i));
+            }
+        }
+
+        vector<string> getTableParam(int num_tables)
+        {
+            vector<string> ret;
+            if (num_tables == 1) ret.push_back(testTableName);
+            else if (num_tables == 2) ret = vector<string> ({testTableName, testTableName2});
+            else ret = vector<string>{testTableName, testTableName2, testTableName3, testTableName4}; // max 4
+            return ret;
+        }
+
+        void start_stop_producers(vector<string> tables)
+        {
+            sleep(1); // buffer for all subscribers to reach selectable state
+            producerPool.clear();
+            cout << "Producer Threads Started" << endl;
+
+            int index = 0;
+            std::for_each(tables.begin(), tables.end(), [&](const string& table) {
+                producerPool.push_back(std::make_shared<thread>(&KeySpaceSubTestFixture::producerWorker, this, index, table));
+                index++;
+            });
+
+            // Join all producer threads
+            std::for_each(producerPool.begin(), producerPool.end(), [](auto& th) {th->join();});
+            cout << "Producer Threads Joined" << endl;
+            sleep(1); // time buffer until all the events are read by subscriber
+        }
+    };
+
+    TEST_F(KeySpaceSubTestFixture, testUnSubscribe)
+    {
+        KeySpaceSubscriber key_space_sub(m_test_db.get());
+        key_space_sub.setClientName("unsubscribetest");
+        auto tables = getTableParam(2);
+
+        for (auto table : tables)
+        {
+            key_space_sub.psubscribe(getkeySpace(table));
+        }
+
+        auto future = std::async(&KeySpaceSubTestFixture::select_loop, this, &key_space_sub);
+        start_stop_producers(tables);
+        stopSubscriber = true; // Exit from selectable state
+
+        int events = future.get();
+        cout << "Num Events with two Subscriber: " << events << endl;
+        ASSERT_TRUE(events == NUMBER_OF_OPS * (int)tables.size() * 2);
+
+        /* unsubscribe from one table */
+        key_space_sub.punsubscribe(getkeySpace(tables[0]));
+
+        stopSubscriber = false;
+        future = std::async(&KeySpaceSubTestFixture::select_loop, this, &key_space_sub);
+        start_stop_producers(tables);
+        stopSubscriber = true;
+
+        events = future.get();
+        cout << "Num Events with one Subscriber: " << events << endl;
+        ASSERT_TRUE(events == NUMBER_OF_OPS * 1 * 2); // Only one table is used
+
+        stopSubscriber = false;
+        /* unsubscribe from all the tables */
+        key_space_sub.punsubscribe(getkeySpace(tables[1]));
+        future = std::async(&KeySpaceSubTestFixture::select_loop, this, &key_space_sub);
+        start_stop_producers(tables);
+        stopSubscriber = true;
+
+        events = future.get();
+        ASSERT_TRUE(events == 0); // No events read
     }
-}
 
-TEST(KeySpaceSubscriber, testkeySpaceSubscription)
-{
-    std::unique_ptr<thread> listenerThread;
+    class KeySpaceSubTestFixtureParameterized :
+        public KeySpaceSubTestFixture,
+        public ::testing::WithParamInterface<std::tuple<int, int>>
+    {
+    public:
+        KeySpaceSubTestFixtureParameterized() = default;
+    };
 
-    clearDB();
+    TEST_P(KeySpaceSubTestFixtureParameterized, testSubscription)
+    {
+        int numSubscribers = get<0>(GetParam());
+        testTables = getTableParam(get<1>(GetParam()));
 
-    cout << "Starting " << 1 << " subscribers on redis" << endl;
+        cout << "Listener Threads Started" << endl;
+        totalEvents.resize(numSubscribers, 0);
 
-    vector<string> tables_listen = {testTableName, testTableName2};
+        for (auto i = 0; i < numSubscribers; i++)
+        {
+            listenerPool.push_back(std::make_shared<thread>(&KeySpaceSubTestFixture::subscriberWorker, this, i));
+        }
 
-    totalEvents = 0;
-    listenerThread = std::make_unique<thread>(subscriberWorker, tables_listen);
+        start_stop_producers(testTables);
 
-    sleep(1);
+        stopSubscriber = true; // Exit from selectable state
 
-    producerWorker(0, testTableName);
-    producerWorker(1, testTableName2);
+        std::for_each(listenerPool.begin(), listenerPool.end(), [](auto& th) {th->join();});
+        cout << "Listener Threads Joined" << endl;
 
-    sleep(2);
+        int th_num = 0;
+        std::for_each(totalEvents.begin(), totalEvents.end(), [&](auto& events) {
+            cout << "Events Capture Thread " << th_num << " : " <<  events << endl;
+            ASSERT_TRUE(events == NUMBER_OF_OPS * (int)testTables.size() * 2);
+            th_num++;
+        });
+    }
 
-    endSubscription = true;
-    
-    listenerThread->join();
-
-    cout << totalEvents << endl;
-
-    ASSERT_TRUE(totalEvents == NUMBER_OF_OPS * (2 + 2)); /* 2 tables, 1 set and 1 del event */
+    INSTANTIATE_TEST_SUITE_P(
+        KeySpaceSubTests,
+        KeySpaceSubTestFixtureParameterized,
+        ::testing::Values(
+                make_tuple(1, 1),
+                make_tuple(1, 2),
+                make_tuple(1, 4),
+                make_tuple(2, 4),
+                make_tuple(2, 2),
+                make_tuple(4, 4)));
 }
