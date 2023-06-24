@@ -120,42 +120,6 @@ def test_SelectYield():
     assert len(cfvs) == 1
     assert cfvs[0] == ('a', 'b')
 
-def test_SelectYieldKeySpaceSubscriber():
-    db = swsscommon.DBConnector("APPL_DB", 0, True)
-    db.flushdb()
-    sel = swsscommon.Select()
-    ksn = swsscommon.KeySpaceSubscriber("APPL_DB")
-    ksn.psubscribe("*")
-    # sel.addSelectable(ksn)
-    print(ksn.getFd())
-
-    # print("Spawning thread: thread_test_func")
-    # test_thread = Thread(target=thread_test_func)
-    # test_thread.start()
-    
-    i = 0
-    while True:
-        # timeout 10s is too long and indicates thread hanging
-        time.sleep(1)
-        print("Data Read")
-        ksn.readData()
-        print("Data ")
-        print(ksn.pops())
-        # (state, c) = sel.select(10000)
-        # if state == swsscommon.Select.OBJECT:
-        #     break
-        # elif state == swsscommon.Select.TIMEOUT:
-        #     i = i + 1
-        #     if (i > 5):
-        #         break
-        #     print("timeout")
-        #     continue
-
-    # test_thread.join()
-    # a = ksn.pop()
-    # assert a
-    # assert False
-
 def test_Notification():
     db = swsscommon.DBConnector("APPL_DB", 0, True)
     ntfc = swsscommon.NotificationConsumer(db, "testntf")

@@ -4,16 +4,16 @@
 #include <hiredis/hiredis.h>
 #include "logger.h"
 #include "dbconnector.h"
-#include "keyspacesubscriber.h"
+#include "redismcselect.h"
 
 namespace swss {
 
-KeySpaceSubscriber::KeySpaceSubscriber(DBConnector *parentConn, int pri) : RedisSelect(pri)
+RedisMCSelect::RedisMCSelect(DBConnector *parentConn, int pri) : RedisSelect(pri)
 {
     m_subscribe.reset(parentConn->newConnector(RedisSelect::SUBSCRIBE_TIMEOUT));
 }
 
-void KeySpaceSubscriber::setClientName(const std::string& name)
+void RedisMCSelect::setClientName(const std::string& name)
 {
     if (m_subscribe && !name.empty())
     {
@@ -21,40 +21,40 @@ void KeySpaceSubscriber::setClientName(const std::string& name)
     }
 }
 
-void KeySpaceSubscriber::subscribe(const std::string &pattern)
+void RedisMCSelect::subscribe(const std::string &pattern)
 {
     m_subscribe->subscribe(pattern);
     m_patterns.insert(pattern);
 }
 
-void KeySpaceSubscriber::psubscribe(const std::string &pattern)
+void RedisMCSelect::psubscribe(const std::string &pattern)
 {
     m_subscribe->psubscribe(pattern);
     m_patterns.insert(pattern);
 }
 
-void KeySpaceSubscriber::punsubscribe(const std::string &pattern)
+void RedisMCSelect::punsubscribe(const std::string &pattern)
 {
     m_subscribe->punsubscribe(pattern);
     m_patterns.erase(pattern);
 }
 
-void KeySpaceSubscriber::subscribe(const std::vector<std::string>& patterns)
+void RedisMCSelect::subscribe(const std::vector<std::string>& patterns)
 {
     m_subscribe->subscribe(processBulk(patterns, true));
 }
 
-void KeySpaceSubscriber::psubscribe(const std::vector<std::string>& patterns)
+void RedisMCSelect::psubscribe(const std::vector<std::string>& patterns)
 {
     m_subscribe->psubscribe(processBulk(patterns, true));
 }
 
-void KeySpaceSubscriber::punsubscribe(const std::vector<std::string>& patterns)
+void RedisMCSelect::punsubscribe(const std::vector<std::string>& patterns)
 {
     m_subscribe->punsubscribe(processBulk(patterns, false));
 }
 
-std::string KeySpaceSubscriber::processBulk(const std::vector<std::string> &patterns, bool add)
+std::string RedisMCSelect::processBulk(const std::vector<std::string> &patterns, bool add)
 {
     std::string pattern = "";
     int num_patterns = (int)patterns.size();
@@ -77,7 +77,7 @@ std::string KeySpaceSubscriber::processBulk(const std::vector<std::string> &patt
     return pattern;
 }
 
-uint64_t KeySpaceSubscriber::readData()
+uint64_t RedisMCSelect::readData()
 {   
     redisReply *reply = nullptr;
 
@@ -90,14 +90,13 @@ uint64_t KeySpaceSubscriber::readData()
         throw std::runtime_error("Unable to read redis reply");
     }
 
-    m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
+    m_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
 
     /* Try to read data from redis cacher.
      * If data exists put it to event buffer.
-     * NOTE: Keyspace event is not persistent and it won't
+     * NOTE: redis notification is not persistent and it won't
      * be possible to read it second time. If it is not stared in
      * the buffer it will be lost. */
-
     reply = nullptr;
     int status;
     do
@@ -105,7 +104,7 @@ uint64_t KeySpaceSubscriber::readData()
         status = redisGetReplyFromReader(m_subscribe->getContext(), reinterpret_cast<void**>(&reply));
         if(reply != nullptr && status == REDIS_OK)
         {
-            m_keyspace_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
+            m_event_buffer.emplace_back(std::make_shared<RedisReply>(reply));
         }
     }
     while(reply != nullptr && status == REDIS_OK);
@@ -117,16 +116,16 @@ uint64_t KeySpaceSubscriber::readData()
     return 0;
 }
 
-bool KeySpaceSubscriber::popEventBuffer(RedisMessage& msg)
+bool MultiKeySpaceSubscriber::popEventBuffer(RedisMessage& msg)
 {
-    if (m_keyspace_event_buffer.empty())
+    if (m_event_buffer.empty())
     {
         return false;
     }
 
-    auto reply = m_keyspace_event_buffer.front();
+    auto reply = m_event_buffer.front();
     msg = reply->getReply<RedisMessage>();
-    m_keyspace_event_buffer.pop_front();
+    m_event_buffer.pop_front();
     
     /* if the Key-space notification is empty, try next one. */
     if (msg.type.empty())
@@ -143,7 +142,7 @@ bool KeySpaceSubscriber::popEventBuffer(RedisMessage& msg)
     return true;
 }
 
-void KeySpaceSubscriber::pops(std::deque<RedisMessage> &dQ)
+void MultiKeySpaceSubscriber::pops(std::deque<RedisMessage> &dQ)
 {   
     RedisMessage ret;
     while (hasData())

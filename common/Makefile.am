@@ -37,6 +37,7 @@ common_libswsscommon_la_SOURCES = \
     common/rediscommand.cpp          \
     common/redistran.cpp             \
     common/redisselect.cpp           \
+    common/redismcselect.cpp         \
     common/select.cpp                \
     common/selectableevent.cpp       \
     common/selectabletimer.cpp       \
@@ -67,7 +68,6 @@ common_libswsscommon_la_SOURCES = \
     common/countertable.cpp          \
     common/redisutility.cpp          \
     common/restart_waiter.cpp        \
-    common/keyspacesubscriber.cpp        \
     common/profileprovider.cpp       \
     common/zmqclient.cpp             \
     common/zmqserver.cpp             \

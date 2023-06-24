@@ -7,7 +7,7 @@
 #include "common/dbconnector.h"
 #include "common/select.h"
 #include "common/table.h"
-#include "common/keyspacesubscriber.h"
+#include "common/redismcselect.h"
 
 using namespace std;
 using namespace swss;
@@ -47,7 +47,7 @@ static inline void clearDB()
     r.checkStatusOK();
 }
 
-namespace keyspacesubscriber_ut
+namespace multikeyspacesubscriber_ut
 {
     using namespace swss;
     using namespace std;
@@ -81,8 +81,8 @@ namespace keyspacesubscriber_ut
 
         void subscriberWorker(int index)
         {
-            KeySpaceSubscriber c(m_test_db.get());
-            std::string clientName = "test_keyspacesubscriber" + to_string(index);
+            MultiKeySpaceSubscriber c(m_test_db.get());
+            std::string clientName = "test_multikeyspacesubscriber" + to_string(index);
             c.setClientName(clientName);
             vector<string> temp;
             for (auto table : testTables)
@@ -94,7 +94,7 @@ namespace keyspacesubscriber_ut
             totalEvents[index] = select_loop(&c);
         }
 
-        int select_loop(KeySpaceSubscriber* s)
+        int select_loop(MultiKeySpaceSubscriber* s)
         {
             Select cs;
             cs.addSelectable(s);
@@ -194,7 +194,7 @@ namespace keyspacesubscriber_ut
 
     TEST_F(KeySpaceSubTestFixture, testUnSubscribe)
     {
-        KeySpaceSubscriber key_space_sub(m_test_db.get());
+        MultiKeySpaceSubscriber key_space_sub(m_test_db.get());
         key_space_sub.setClientName("unsubscribetest");
         auto tables = getTableParam(2);
 

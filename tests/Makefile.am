@@ -16,7 +16,7 @@ tests_tests_SOURCES = tests/redis_ut.cpp                \
                       tests/converter_ut.cpp            \
                       tests/exec_ut.cpp                 \
                       tests/redis_subscriber_state_ut.cpp \
-                      tests/redis_keyspacesub_ut.cpp       \
+                      tests/redis_multichannel_ut.cpp     \
                       tests/selectable_priority.cpp       \
                       tests/warm_restart_ut.cpp         \
                       tests/redis_multi_db_ut.cpp       \
