@@ -8,14 +8,10 @@
 
 namespace swss {
 
-RedisMCSelect::RedisMCSelect(DBConnector *parentConn, int pri) : RedisSelect(pri)
+RedisMCSelect::RedisMCSelect(DBConnector *parentConn, int pri, const std::string& name) : RedisSelect(pri)
 {
     m_subscribe.reset(parentConn->newConnector(RedisSelect::SUBSCRIBE_TIMEOUT));
-}
-
-void RedisMCSelect::setClientName(const std::string& name)
-{
-    if (m_subscribe && !name.empty())
+    if (!name.empty())
     {
         m_subscribe->setClientName(name);
     }

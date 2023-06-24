@@ -81,9 +81,8 @@ namespace multikeyspacesubscriber_ut
 
         void subscriberWorker(int index)
         {
-            MultiKeySpaceSubscriber c(m_test_db.get());
             std::string clientName = "test_multikeyspacesubscriber" + to_string(index);
-            c.setClientName(clientName);
+            MultiKeySpaceSubscriber c(m_test_db.get(), 0, clientName);
             vector<string> temp;
             for (auto table : testTables)
             {
@@ -194,8 +193,7 @@ namespace multikeyspacesubscriber_ut
 
     TEST_F(KeySpaceSubTestFixture, testUnSubscribe)
     {
-        MultiKeySpaceSubscriber key_space_sub(m_test_db.get());
-        key_space_sub.setClientName("unsubscribetest");
+        MultiKeySpaceSubscriber key_space_sub(m_test_db.get(), 0, "unsubscribetest");
         auto tables = getTableParam(2);
 
         for (auto table : tables)

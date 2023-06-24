@@ -17,7 +17,7 @@ namespace swss {
 class RedisMCSelect : public RedisSelect
 {
 public:
-    RedisMCSelect(DBConnector *parentConn, int pri);
+    RedisMCSelect(DBConnector *parentConn, int pri, const std::string& name = "RedisMCSelect");
 
     /* Use the existing redisContext, SELECT DB and SUBSCRIBE */
     void subscribe(const std::string &);
@@ -33,7 +33,6 @@ public:
     void psubscribe(const std::vector<std::string> &);
     void punsubscribe(const std::vector<std::string> &);
 
-    void setClientName(const std::string& name);
     uint64_t getMaxEvents() override {return static_cast<uint64_t>(m_patterns.size());}
 
     /* Read reply event from redis */
@@ -58,8 +57,8 @@ private:
 class MultiKeySpaceSubscriber : public RedisMCSelect
 {
 public:
-    MultiKeySpaceSubscriber(DBConnector *parentConn, int pri = 0) : 
-        RedisMCSelect(parentConn, pri) {}
+    MultiKeySpaceSubscriber(DBConnector *parentConn, int pri = 0, const std::string& name = "MultiKeySpaceSubscriber") :
+        RedisMCSelect(parentConn, pri, name) {}
     
     /* XLate the RedisReply stored in the event buffer into a Redis Message */
     void pops(std::deque<RedisMessage> &dQ);
