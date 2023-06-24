@@ -76,10 +76,9 @@ void Select::removeSelectable(Selectable *selectable)
         return ;
     }
 
-    auto events_sel = m_objects[fd].maxevents;    
+    sz_selectables = sz_selectables - m_objects[fd].maxevents;
     m_objects.erase(fd);
     m_ready.erase(selectable);
-    sz_selectables = sz_selectables - events_sel ? events_sel <= sz_selectables : recompute_maxevents();
 
     int res = ::epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, fd, NULL);
     if (res == -1)

@@ -83,14 +83,6 @@ private:
 
     std::unordered_map<int, SelData> m_objects;
     std::set<Selectable *, Select::cmp> m_ready;
-
-    uint64_t inline recompute_maxevents()
-    {
-        uint64_t num_ev = 0;
-        std::for_each(m_objects.begin(), m_objects.end(), [&](const std::pair<int, SelData>& obj) {num_ev += obj.second.maxevents;});
-        return num_ev;
-    }
-    
 };
 
 }
