@@ -28,6 +28,11 @@ else
 CONFIGURE_ARGS += --disable-python2
 endif
 
+# Skip compiling classes that depend on libyang
+ifneq (,$(filter noyangmod,$(DEB_BUILD_PROFILES)))
+CONFIGURE_ARGS += --disable-yang-modules
+endif
+
 # main packaging script
 %:
 	dh $@
